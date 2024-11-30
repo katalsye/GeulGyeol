@@ -1,104 +1,191 @@
 // 드래그한 문장을 감지하여 처리
-document.addEventListener('mouseup', handleMouseUp);
-document.addEventListener('selectionchange', handleSelectionChange);
+document.addEventListener("mouseup", handleMouseUp);
+document.addEventListener("selectionchange", handleSelectionChange);
 
+let activeIcon = null; // 현재 활성화된 아이콘 상태
 let activeTable = null; // 현재 활성화된 테이블 상태
 
-// 마우스 업 이벤트: 선택된 텍스트로 동적 테이블 생성
+// 마우스 업 이벤트 처리
 function handleMouseUp() {
     const selectedText = window.getSelection().toString().trim();
-    if (selectedText.length === 0) return; // 선택된 텍스트가 없으면 종료
+    if (!selectedText) {
+        removeExistingIcon();
+        return;
+    }
 
-    removeExistingTable();
-    createDynamicTable(selectedText.split(/\s+/));
+    const rect = getSelectionRect();
+    if (rect) {
+        showIconAtPosition(rect, selectedText); // 아이콘은 항상 표시
+    }
 }
 
-// 선택 상태 변경 이벤트: 선택 해제 시 테이블 제거
+// 선택 상태 변경 이벤트 처리
 function handleSelectionChange() {
     const selection = window.getSelection();
-    if (selection.isCollapsed) removeExistingTable();
+    if (selection.isCollapsed) {
+        removeExistingIcon();
+    }
 }
 
-// 기존 동적 테이블 제거
+// 드래그한 문장의 위치 계산
+function getSelectionRect() {
+    const selection = window.getSelection();
+    if (!selection || selection.rangeCount === 0) return null;
+
+    const range = selection.getRangeAt(0);
+    const rect = range.getBoundingClientRect();
+    return {
+        left: rect.left + window.scrollX,
+        right: rect.right + window.scrollX,
+        top: rect.top + window.scrollY,
+        bottom: rect.bottom + window.scrollY,
+        height: rect.height,
+    };
+}
+
+// 아이콘 표시
+function showIconAtPosition(rect, selectedText) {
+    if (activeIcon) {
+        return;
+    }
+
+    const button = document.createElement("button");
+    button.style.position = "absolute";
+    button.style.left = `${rect.right}px`;
+    button.style.top = `${rect.top - 4}px`;
+    button.style.width = "32px";
+    button.style.height = "32px";
+    button.style.border = "none";
+    button.style.padding = "0";
+    button.style.background = "none";
+    button.style.cursor = "pointer";
+    button.style.zIndex = "9999";
+
+    const icon = document.createElement("img");
+    icon.src = chrome.runtime.getURL("images/iconimage.png");
+    icon.style.width = "100%";
+    icon.style.height = "100%";
+    button.appendChild(icon);
+
+    button.addEventListener("click", () => {
+        if (selectedText.length > 50) {
+            removeExistingIcon();
+            alert(`선택한 글자가 50자를 초과하였습니다. (${selectedText.length}자)`);
+            return;
+        }
+
+        chrome.runtime.sendMessage(
+            { type: "FETCH_SYNONYMS", text: selectedText },
+            (response) => {
+                if (response.success) {
+                    removeExistingTable();
+                    createDynamicTable(response.data);
+                }
+            }
+        );
+    });
+
+    document.body.appendChild(button);
+    activeIcon = button;
+}
+
+// 기존 아이콘 제거
+function removeExistingIcon() {
+    if (activeIcon) {
+        activeIcon.remove();
+        activeIcon = null;
+    }
+}
+
+// 기존 테이블 제거
 function removeExistingTable() {
     if (activeTable) {
-        activeTable.dispatchEvent(new Event('remove'));
         activeTable.remove();
         activeTable = null;
     }
 }
 
-// 선택된 텍스트의 위치 계산
-function getSelectionRect() {
-    const selection = window.getSelection();
-    if (!selection || selection.rangeCount === 0) return { left: 100, top: 100, width: 200, height: 50 };
-
-    try {
-        const range = selection.getRangeAt(0);
-        let rect = range.getBoundingClientRect();
-
-        // boundingRect 유효성 확인 및 대체 처리
-        while ((!rect || rect.width <= 0 || rect.height <= 0) && range.startContainer) {
-            let parentElement = range.startContainer.nodeType === Node.TEXT_NODE 
-                ? range.startContainer.parentElement 
-                : range.startContainer;
-
-            if (!parentElement) return { left: 100, top: 100, width: 200, height: 50 };
-            rect = parentElement.getBoundingClientRect();
-        }
-
-        if (rect && rect.width > 0 && rect.height > 0) {
-            return {
-                left: rect.left + window.scrollX,
-                top: rect.top + window.scrollY,
-                width: rect.width,
-                height: rect.height,
-            };
-        }
-    } catch (error) {
-        console.error("getSelectionRect에서 예외 발생:", error);
-    }
-
-    return { left: 100, top: 100, width: 200, height: 50 };
-}
-
-// 동적 테이블(AI 기반 단어로 셀 수정 필요 -> 현재 작성된 내용 필요 없음)
-function createDynamicTable(words) {
-    if (!words || words.length === 0) return;
+function createDynamicTable(wordData) {
+    removeExistingIcon();
+    removeExistingTable();
+    if (!wordData || wordData.length === 0) return;
 
     const rect = getSelectionRect();
-    const wordData = words.map(word => ({
-        word,
-        meaning: `${word}의 뜻이 매우 길어질 경우를 대비한 줄 바꿈 처리`,
-        synonyms: [
-            { word: `${word}_syn1`, meaning: `${word}의 유의어1의 뜻이 매우 길어질 경우를 대비한 줄 바꿈 처리` },
-            { word: `${word}_syn2`, meaning: `${word}의 유의어2의 뜻` },
-            { word: `${word}_syn3`, meaning: `${word}의 유의어3의 뜻` },
-        ],
-    }));
+    if (!rect) {
+        return;
+    }
 
-    const tableContainer = document.createElement('div');
-    tableContainer.id = 'dynamic-table-container';
-    tableContainer.style.position = 'absolute';
-    tableContainer.style.left = `${rect.left}px`;
-    tableContainer.style.top = `${rect.top - rect.height - 15}px`;
-    tableContainer.style.backgroundColor = 'white';
-    tableContainer.style.border = 'none';
-    tableContainer.style.padding = '10px';
-    tableContainer.style.boxShadow = '0 4px 12px rgba(0, 0, 0, 0.15)';
-    tableContainer.style.zIndex = '9999';
-    tableContainer.style.overflow = 'hidden';
-    tableContainer.style.width = '700px';
-    tableContainer.style.height = '250px';
-
-    const tableWrapper = document.createElement('div');
+    // 기본 컨테이너 및 테이블 크기
+    const baseContainerHeight = 240;
+    const baseTableHeight = 140;
     const tableWidth = 680;
-    const tableMargin = (700 - tableWidth) / 2;
-    tableWrapper.style.display = 'flex';
-    tableWrapper.style.transition = 'transform 0.3s ease-in-out';
+    const tableMargin = (700 - tableWidth) / 2; 
+
+    let additionalHeight = 0; // 긴 단어가 있을 경우 추가 높이
+
+    // 긴 단어 확인
+    let hasLongWord = false;
+    wordData.forEach(currentWord => {
+        if (currentWord["기존 표현"].length > 13) hasLongWord = true;
+        currentWord["대체 표현"].forEach(synonym => {
+            if (synonym["표현"].length > 13) hasLongWord = true;
+        });
+    });
+
+    // 긴 단어가 있을 경우 하단 영역 확장
+    if (hasLongWord) {
+        additionalHeight = 60;
+    }
+
+    const containerHeight = baseContainerHeight + additionalHeight;
+    const tableHeight = baseTableHeight + additionalHeight;
+
+    // 컨테이너 생성
+    const tableContainer = document.createElement("div");
+    tableContainer.id = "dynamic-table-container";
+    tableContainer.style.position = "absolute";
+    tableContainer.style.left = `${rect.left}px`;
+    tableContainer.style.top = `${rect.top + rect.height - (baseContainerHeight + 30 + additionalHeight)}px`;
+    tableContainer.style.backgroundColor = "#F8F8FA";
+    tableContainer.style.border = "none";
+    tableContainer.style.borderRadius = "6px";
+    tableContainer.style.padding = "10px";
+    tableContainer.style.boxShadow = "0 4px 12px rgba(0, 0, 0, 0.15)";
+    tableContainer.style.zIndex = "9999";
+    tableContainer.style.overflow = "hidden";
+    tableContainer.style.width = "700px";
+    tableContainer.style.height = `${containerHeight}px`;
+    tableContainer.style.fontFamily = "'Pretendard Variable'";
+
+
+    // Exit 버튼 추가
+    const exitButton = document.createElement("img");
+    exitButton.src = chrome.runtime.getURL("images/exitimage.png");
+    exitButton.alt = "Close";
+    exitButton.style.position = "absolute";
+    exitButton.style.width = "16px";
+    exitButton.style.height = "16px";
+    exitButton.style.objectFit = "contain";
+    exitButton.style.cursor = "pointer";
+    exitButton.style.zIndex = "10000";
+    exitButton.style.right = `${tableMargin + 5}px`;
+    exitButton.style.top = "15px";
+
+    exitButton.addEventListener("click", () => {
+        removeExistingTable();
+    });
+
+    tableContainer.appendChild(exitButton);
+
+    // 테이블 래퍼 생성
+    const tableWrapper = document.createElement("div");
+    tableWrapper.style.display = "flex";
+    tableWrapper.style.transition = "transform 0.3s ease-in-out";
     tableWrapper.style.width = `${(tableWidth + tableMargin * 2) * wordData.length}px`;
-    tableWrapper.style.height = '150px';
-    tableWrapper.style.marginTop = '26px';
+    tableWrapper.style.height = `${baseTableHeight}px`;
+    tableWrapper.style.position = "absolute";
+    tableWrapper.style.top = "40px";
+    tableWrapper.style.left = "0";
 
     tableContainer.appendChild(tableWrapper);
     document.body.appendChild(tableContainer);
@@ -108,17 +195,20 @@ function createDynamicTable(words) {
     const meaningCellWidth = tableWidth * (3 / 4);
 
     wordData.forEach(currentWord => {
-        const table = document.createElement('table');
-        table.style.borderCollapse = 'separate';
+        const table = document.createElement("table");
+        table.style.borderCollapse = "separate";
         table.style.width = `${tableWidth}px`;
-        table.style.height = '120px';
+        table.style.height = `${baseTableHeight}px`; // 기본 테이블 높이
         table.style.margin = `0 ${tableMargin}px`;
-        table.style.flexShrink = '0';
-        table.cellSpacing = '5';
+        table.style.flexShrink = "0";
+        table.cellSpacing = "5";
 
         const rows = [
-            { word: currentWord.word, meaning: currentWord.meaning },
-            ...currentWord.synonyms,
+            { word: currentWord["기존 표현"], meaning: currentWord["뜻"] },
+            ...currentWord["대체 표현"].map(synonym => ({
+                word: synonym["표현"],
+                meaning: synonym["뜻"]
+            }))
         ];
 
         rows.forEach((rowData, index) => {
@@ -126,28 +216,49 @@ function createDynamicTable(words) {
 
             const wordCell = row.insertCell();
             wordCell.textContent = rowData.word;
-            wordCell.style.border = '1px solid black';
-            wordCell.style.padding = '10px';
-            wordCell.style.textAlign = 'center';
-            wordCell.style.fontSize = '14px';
-            wordCell.style.borderRadius = '6px';
-            wordCell.style.backgroundColor = index === 0 ? '#e0e0e0' : '#ffffff';
-            wordCell.style.wordWrap = 'break-word';
-            wordCell.style.whiteSpace = 'normal';
+            wordCell.style.padding = "10px";
+            wordCell.style.textAlign = "center";
+            wordCell.style.fontSize = "14px";
+            wordCell.style.fontWeight = "bold";
+            wordCell.style.wordWrap = "break-word";
+            wordCell.style.letterSpacing = "-0.025em";
+            wordCell.style.whiteSpace = "normal";
             wordCell.style.width = `${wordCellWidth}px`;
 
             const meaningCell = row.insertCell();
             meaningCell.textContent = rowData.meaning;
-            meaningCell.style.border = '1px solid black';
-            meaningCell.style.padding = '10px';
-            meaningCell.style.textAlign = 'center';
-            meaningCell.style.fontSize = '14px';
-            meaningCell.style.borderRadius = '6px';
-            meaningCell.style.backgroundColor = index === 0 ? '#e0e0e0' : '#ffffff';
-            meaningCell.style.wordWrap = 'break-word';
-            meaningCell.style.whiteSpace = 'normal';
+            meaningCell.style.padding = "10px";
+            meaningCell.style.paddingLeft = "15px";
+            meaningCell.style.textAlign = "left";
+            meaningCell.style.letterSpacing = "-0.025em";
+            meaningCell.style.fontSize = "14px";
+            meaningCell.style.wordWrap = "break-word";
+            meaningCell.style.whiteSpace = "normal";
             meaningCell.style.width = `${meaningCellWidth}px`;
+
+            switch (index) {
+                case 0:
+                    row.style.backgroundColor = "#3B3B3B";
+                    wordCell.style.color = "#FFFFFF";
+                    meaningCell.style.color = "#FFFFFF";
+                    break;
+                case 1:
+                    row.style.backgroundColor = "#FFFFFF";
+                    break;
+                case 2:
+                    row.style.backgroundColor = "#E9E9E9";
+                    break;
+                case 3:
+                    row.style.backgroundColor = "#FFFFFF";
+                    break;
+                default:
+                    row.style.backgroundColor = "#FFFFFF";
+                    break;
+            }
         });
+
+        table.style.borderCollapse = "collapse";
+        table.style.border = "none";
 
         tableWrapper.appendChild(table);
     });
@@ -155,28 +266,28 @@ function createDynamicTable(words) {
     let currentPage = 0;
     const totalPages = wordData.length;
 
-    const scrollbar = document.createElement('input');
-    scrollbar.type = 'range';
-    scrollbar.min = '0';
+    const scrollbar = document.createElement("input");
+    scrollbar.type = "range";
+    scrollbar.min = "0";
     scrollbar.max = `${totalPages - 1}`;
-    scrollbar.value = '0';
-    scrollbar.step = '1';
-    scrollbar.style.position = 'absolute';
-    scrollbar.style.left = '10px';
-    scrollbar.style.bottom = '15px';
-    scrollbar.style.width = '680px';
-    scrollbar.style.zIndex = '10000';
+    scrollbar.value = "0";
+    scrollbar.step = "1";
+    scrollbar.style.position = "absolute";
+    scrollbar.style.left = "10px";
+    scrollbar.style.bottom = "15px";
+    scrollbar.style.width = "680px";
+    scrollbar.style.zIndex = "10000";
 
     tableContainer.appendChild(scrollbar);
 
-    scrollbar.addEventListener('input', (event) => {
+    scrollbar.addEventListener("input", (event) => {
         currentPage = parseInt(event.target.value, 10);
         tableWrapper.style.transform = `translateX(-${currentPage * (tableWidth + tableMargin * 2)}px)`;
     });
 
-    tableContainer.addEventListener('wheel', (event) => {
+    tableContainer.addEventListener("wheel", (event) => {
         event.preventDefault();
-        const direction = event.deltaY > 0 ? 1 : -1;
+        const direction = event.deltaY > 0 ? -1 : 1;
         const newPage = currentPage + direction;
 
         if (newPage >= 0 && newPage < totalPages) {

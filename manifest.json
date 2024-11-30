@@ -1,13 +1,39 @@
 {
   "manifest_version": 3,
   "name": "글결",
-  "description": "Track words entered in text fields",
+  "description": "드래그한 텍스트를 OpenAI API로 처리하여 유의어를 반환하는 확장 프로그램",
   "version": "1.0",
+  "permissions": [
+    "scripting",
+    "storage",
+    "activeTab"
+  ],
+  "host_permissions": ["<all_urls>", "https://api.openai.com/*"],
+  "background": {
+    "service_worker": "background.js",
+    "type": "module"
+  },
   "content_scripts": [
     {
-      "matches": ["<all_urls>"], 
+      "matches": ["<all_urls>"],
       "js": ["content.js"],
       "run_at": "document_end"
     }
-  ]
+  ],
+  "web_accessible_resources": [
+    {
+      "resources": ["fonts/PretendardVariable.woff2", "images/iconimage.png", "images/exitimage.png"],
+      "matches": ["<all_urls>"]
+    }
+  ],
+  "icons" : 
+    {
+      "16": "images/iconimage.png",
+      "48": "images/iconimage.png",
+      "128": "images/iconimage.png"
+    },
+  "content_security_policy": {
+    "extension_pages": "script-src 'self'; object-src 'self'"
+  }
+    
 }
